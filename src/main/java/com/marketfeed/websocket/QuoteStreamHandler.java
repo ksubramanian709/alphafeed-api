@@ -117,7 +117,7 @@ public class QuoteStreamHandler extends TextWebSocketHandler {
         map.put("currency", q.getCurrency());
         map.put("assetType", q.getAssetType());
         map.put("source", response.getSource());
-        map.put("timestamp", q.getTimestamp());
+        map.put("timestamp", q.getTimestamp() != null ? q.getTimestamp().toString() : "");
         return map;
     }
 
