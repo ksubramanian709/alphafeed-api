@@ -1,1 +1,1 @@
-https://market-feed-production.up.railway.app
+https://market-feed-ui.vercel.app/
