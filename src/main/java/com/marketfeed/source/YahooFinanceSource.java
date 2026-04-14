@@ -23,25 +23,21 @@ public class YahooFinanceSource implements MarketDataSource {
 
     private final RestTemplate restTemplate;
 
-    private static final String CHART_URL =
-            "https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=1d";
+    private static final String BASE_URL =
+            "https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=%s&range=%s";
     private static final String HISTORY_URL =
             "https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&period1=%d&period2=%d";
 
     @Override
-    public String getName() {
-        return "yahoo_finance";
-    }
+    public String getName() { return "yahoo_finance"; }
 
     @Override
-    public boolean isAvailable() {
-        return true; // no API key, always attempt
-    }
+    public boolean isAvailable() { return true; }
 
     @Override
     public Optional<Quote> getQuote(String symbol) {
         try {
-            String url = String.format(CHART_URL, symbol);
+            String url = String.format(BASE_URL, symbol, "1d", "1d");
             ResponseEntity<ChartResponse> response = restTemplate.exchange(
                     url, HttpMethod.GET, buildRequest(), ChartResponse.class);
 
@@ -50,12 +46,25 @@ public class YahooFinanceSource implements MarketDataSource {
             if (result == null) return Optional.empty();
 
             ChartResponse.Meta meta = result.getMeta();
+
+            // Yahoo sometimes returns 0 for change fields — compute from previousClose
+            double price = meta.getRegularMarketPrice();
+            double prevClose = meta.getChartPreviousClose() > 0
+                    ? meta.getChartPreviousClose()
+                    : meta.getRegularMarketPreviousClose();
+            double change = meta.getRegularMarketChange() != 0
+                    ? meta.getRegularMarketChange()
+                    : (prevClose > 0 ? price - prevClose : 0);
+            double changePct = meta.getRegularMarketChangePercent() != 0
+                    ? meta.getRegularMarketChangePercent()
+                    : (prevClose > 0 ? (change / prevClose) * 100 : 0);
+
             Quote quote = Quote.builder()
                     .symbol(meta.getSymbol())
                     .name(meta.getLongName() != null ? meta.getLongName() : meta.getSymbol())
-                    .price(meta.getRegularMarketPrice())
-                    .change(meta.getRegularMarketChange())
-                    .changePercent(meta.getRegularMarketChangePercent())
+                    .price(price)
+                    .change(change)
+                    .changePercent(changePct)
                     .open(meta.getRegularMarketOpen())
                     .high(meta.getRegularMarketDayHigh())
                     .low(meta.getRegularMarketDayLow())
@@ -78,42 +87,66 @@ public class YahooFinanceSource implements MarketDataSource {
             long period1 = from.atStartOfDay(ZoneId.of("America/New_York")).toEpochSecond();
             long period2 = to.plusDays(1).atStartOfDay(ZoneId.of("America/New_York")).toEpochSecond();
             String url = String.format(HISTORY_URL, symbol, period1, period2);
-
-            ResponseEntity<ChartResponse> response = restTemplate.exchange(
-                    url, HttpMethod.GET, buildRequest(), ChartResponse.class);
-
-            if (response.getBody() == null) return Collections.emptyList();
-            ChartResponse.Result result = extractResult(response.getBody());
-            if (result == null || result.getTimestamps() == null) return Collections.emptyList();
-
-            List<Long> timestamps = result.getTimestamps();
-            ChartResponse.Indicators.Quote q = result.getIndicators().getQuote().get(0);
-            List<OhlcvBar> bars = new ArrayList<>();
-
-            for (int i = 0; i < timestamps.size(); i++) {
-                if (q.getClose().get(i) == null) continue;
-                LocalDate date = Instant.ofEpochSecond(timestamps.get(i))
-                        .atZone(ZoneId.of("America/New_York")).toLocalDate();
-                bars.add(OhlcvBar.builder()
-                        .date(date)
-                        .open(nullSafe(q.getOpen().get(i)))
-                        .high(nullSafe(q.getHigh().get(i)))
-                        .low(nullSafe(q.getLow().get(i)))
-                        .close(nullSafe(q.getClose().get(i)))
-                        .volume(q.getVolume().get(i) != null ? q.getVolume().get(i) : 0L)
-                        .build());
-            }
-            return bars;
-
+            return fetchBars(url, true);
         } catch (Exception e) {
             log.warn("YahooFinance getHistory failed for {}: {}", symbol, e.getMessage());
             return Collections.emptyList();
         }
     }
 
+    /**
+     * Fetch chart data using Yahoo's interval/range API — used for frontend charting.
+     * interval: 1m, 5m, 15m, 60m, 1d, 1wk, 1mo
+     * range:    1d, 5d, 1mo, 3mo, 6mo, 1y, 5y
+     */
+    public List<OhlcvBar> getChart(String symbol, String interval, String range) {
+        try {
+            String url = String.format(BASE_URL, symbol, interval, range);
+            boolean isDaily = interval.equals("1d") || interval.equals("1wk") || interval.equals("1mo");
+            return fetchBars(url, isDaily);
+        } catch (Exception e) {
+            log.warn("YahooFinance getChart failed for {} ({}/{}): {}", symbol, interval, range, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private List<OhlcvBar> fetchBars(String url, boolean useDateOnly) {
+        ResponseEntity<ChartResponse> response = restTemplate.exchange(
+                url, HttpMethod.GET, buildRequest(), ChartResponse.class);
+
+        if (response.getBody() == null) return Collections.emptyList();
+        ChartResponse.Result result = extractResult(response.getBody());
+        if (result == null || result.getTimestamps() == null) return Collections.emptyList();
+
+        List<Long> timestamps = result.getTimestamps();
+        ChartResponse.Indicators.Quote q = result.getIndicators().getQuote().get(0);
+        List<OhlcvBar> bars = new ArrayList<>();
+
+        for (int i = 0; i < timestamps.size(); i++) {
+            if (q.getClose() == null || i >= q.getClose().size()) continue;
+            if (q.getClose().get(i) == null) continue;
+
+            long epochSec = timestamps.get(i);
+            OhlcvBar.OhlcvBarBuilder bar = OhlcvBar.builder()
+                    .timestampEpoch(epochSec)
+                    .open(nullSafe(q.getOpen() != null && i < q.getOpen().size() ? q.getOpen().get(i) : null))
+                    .high(nullSafe(q.getHigh() != null && i < q.getHigh().size() ? q.getHigh().get(i) : null))
+                    .low(nullSafe(q.getLow() != null && i < q.getLow().size() ? q.getLow().get(i) : null))
+                    .close(nullSafe(q.getClose().get(i)))
+                    .volume(q.getVolume() != null && i < q.getVolume().size() && q.getVolume().get(i) != null
+                            ? q.getVolume().get(i) : 0L);
+
+            if (useDateOnly) {
+                bar.date(Instant.ofEpochSecond(epochSec)
+                        .atZone(ZoneId.of("America/New_York")).toLocalDate());
+            }
+            bars.add(bar.build());
+        }
+        return bars;
+    }
+
     private HttpEntity<Void> buildRequest() {
         HttpHeaders headers = new HttpHeaders();
-        // Yahoo Finance requires a browser-like User-Agent
         headers.set(HttpHeaders.USER_AGENT,
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36");
         headers.set(HttpHeaders.ACCEPT, "application/json");
@@ -128,18 +161,16 @@ public class YahooFinanceSource implements MarketDataSource {
         return results.get(0);
     }
 
-    private double nullSafe(Double d) {
-        return d != null ? d : 0.0;
-    }
+    private double nullSafe(Double d) { return d != null ? d : 0.0; }
 
     private Quote.AssetType inferAssetType(String instrumentType, String symbol) {
         if (instrumentType != null) {
             return switch (instrumentType.toUpperCase()) {
-                case "FUTURE"        -> Quote.AssetType.FUTURE;
-                case "CURRENCY"      -> Quote.AssetType.FOREX;
-                case "INDEX"         -> Quote.AssetType.INDEX;
-                case "CRYPTOCURRENCY"-> Quote.AssetType.CRYPTO;
-                default              -> Quote.AssetType.EQUITY;
+                case "FUTURE"         -> Quote.AssetType.FUTURE;
+                case "CURRENCY"       -> Quote.AssetType.FOREX;
+                case "INDEX"          -> Quote.AssetType.INDEX;
+                case "CRYPTOCURRENCY" -> Quote.AssetType.CRYPTO;
+                default               -> Quote.AssetType.EQUITY;
             };
         }
         if (symbol.endsWith("=F")) return Quote.AssetType.FUTURE;
@@ -177,10 +208,12 @@ public class YahooFinanceSource implements MarketDataSource {
             private double regularMarketPrice;
             private double regularMarketChange;
             private double regularMarketChangePercent;
+            private double regularMarketPreviousClose;
+            private double chartPreviousClose;          // more reliable for futures
             private double regularMarketOpen;
             private double regularMarketDayHigh;
             private double regularMarketDayLow;
-            private long regularMarketVolume;
+            private long   regularMarketVolume;
         }
 
         @Data @JsonIgnoreProperties(ignoreUnknown = true)
@@ -193,7 +226,7 @@ public class YahooFinanceSource implements MarketDataSource {
                 private List<Double> high;
                 private List<Double> low;
                 private List<Double> close;
-                private List<Long> volume;
+                private List<Long>   volume;
             }
         }
     }

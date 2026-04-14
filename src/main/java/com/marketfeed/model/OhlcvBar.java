@@ -8,7 +8,8 @@ import java.time.LocalDate;
 @Data
 @Builder
 public class OhlcvBar {
-    private LocalDate date;
+    private LocalDate date;     // daily bars
+    private Long timestampEpoch; // intraday bars (epoch seconds)
     private double open;
     private double high;
     private double low;

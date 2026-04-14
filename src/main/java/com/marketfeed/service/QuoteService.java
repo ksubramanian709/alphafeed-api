@@ -18,7 +18,8 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class QuoteService {
 
-    private final List<MarketDataSource> sources; // Spring injects all MarketDataSource beans in order
+    private final List<MarketDataSource> sources;
+    private final com.marketfeed.source.YahooFinanceSource yahooFinanceSource;
 
     /**
      * Fetches a quote by trying each source in priority order (AlphaVantage → Yahoo).
@@ -59,6 +60,20 @@ public class QuoteService {
     /**
      * Source health status — used by /v1/health endpoint.
      */
+    /**
+     * Chart bars using Yahoo's interval/range API.
+     * interval: 1m, 5m, 15m, 60m, 1d, 1wk, 1mo
+     * range:    1d, 5d, 1mo, 3mo, 6mo, 1y, 5y
+     */
+    @Cacheable(value = "history", key = "#symbol.toUpperCase() + '_chart_' + #interval + '_' + #range")
+    public ApiResponse<List<OhlcvBar>> getChart(String symbol, String interval, String range) {
+        List<OhlcvBar> bars = yahooFinanceSource.getChart(symbol.toUpperCase(), interval, range);
+        if (bars.isEmpty()) {
+            return ApiResponse.error("No chart data for: " + symbol);
+        }
+        return ApiResponse.success(bars, "yahoo_finance");
+    }
+
     public List<SourceStatus> getSourceStatuses() {
         return sources.stream()
                 .map(s -> new SourceStatus(s.getName(), s.isAvailable()))

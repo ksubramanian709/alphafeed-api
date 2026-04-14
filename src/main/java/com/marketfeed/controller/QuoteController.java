@@ -36,6 +36,18 @@ public class QuoteController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/chart/{symbol}")
+    @Operation(summary = "Chart data with interval and range",
+               description = "interval: 1m,5m,15m,60m,1d,1wk,1mo — range: 1d,5d,1mo,3mo,6mo,1y,5y")
+    public ResponseEntity<ApiResponse<List<OhlcvBar>>> getChart(
+            @PathVariable String symbol,
+            @RequestParam(defaultValue = "1d") String interval,
+            @RequestParam(defaultValue = "1mo") String range) {
+        ApiResponse<List<OhlcvBar>> response = quoteService.getChart(symbol, interval, range);
+        if (response.getError() != null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/history/{symbol}")
     @Operation(summary = "Get OHLCV history for a symbol",
                description = "Returns daily OHLCV bars for the given date range. Cached 6h.")
