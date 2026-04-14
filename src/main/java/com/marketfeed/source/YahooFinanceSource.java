@@ -27,6 +27,8 @@ public class YahooFinanceSource implements MarketDataSource {
             "https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=%s&range=%s";
     private static final String HISTORY_URL =
             "https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&period1=%d&period2=%d";
+    private static final String SUMMARY_URL =
+            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=summaryDetail,price";
 
     @Override
     public String getName() { return "yahoo_finance"; }
@@ -47,7 +49,6 @@ public class YahooFinanceSource implements MarketDataSource {
 
             ChartResponse.Meta meta = result.getMeta();
 
-            // Yahoo sometimes returns 0 for change fields — compute from previousClose
             double price = meta.getRegularMarketPrice();
             double prevClose = meta.getChartPreviousClose() > 0
                     ? meta.getChartPreviousClose()
@@ -58,6 +59,9 @@ public class YahooFinanceSource implements MarketDataSource {
             double changePct = meta.getRegularMarketChangePercent() != 0
                     ? meta.getRegularMarketChangePercent()
                     : (prevClose > 0 ? (change / prevClose) * 100 : 0);
+
+            // Fetch extended stats (52wk range, market cap) from quoteSummary
+            QuoteSummary summary = fetchQuoteSummary(symbol);
 
             Quote quote = Quote.builder()
                     .symbol(meta.getSymbol())
@@ -72,9 +76,9 @@ public class YahooFinanceSource implements MarketDataSource {
                     .currency(meta.getCurrency() != null ? meta.getCurrency() : "USD")
                     .assetType(inferAssetType(meta.getInstrumentType(), symbol))
                     .timestamp(Instant.now())
-                    .marketCap(meta.getMarketCap())
-                    .fiftyTwoWeekHigh(meta.getFiftyTwoWeekHigh())
-                    .fiftyTwoWeekLow(meta.getFiftyTwoWeekLow())
+                    .marketCap(summary != null ? summary.getMarketCap() : meta.getMarketCap())
+                    .fiftyTwoWeekHigh(summary != null ? summary.getFiftyTwoWeekHigh() : meta.getFiftyTwoWeekHigh())
+                    .fiftyTwoWeekLow(summary != null  ? summary.getFiftyTwoWeekLow()  : meta.getFiftyTwoWeekLow())
                     .build();
             return Optional.of(quote);
 
@@ -82,6 +86,45 @@ public class YahooFinanceSource implements MarketDataSource {
             log.warn("YahooFinance getQuote failed for {}: {}", symbol, e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /** Calls quoteSummary for reliable 52-week range + market cap. Returns null on failure. */
+    private QuoteSummary fetchQuoteSummary(String symbol) {
+        try {
+            String url = String.format(SUMMARY_URL, symbol);
+            ResponseEntity<SummaryResponse> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, buildRequest(), SummaryResponse.class);
+            if (resp.getBody() == null) return null;
+            SummaryResponse.QuoteSummaryWrapper qs = resp.getBody().getQuoteSummary();
+            if (qs == null || qs.getResult() == null || qs.getResult().isEmpty()) return null;
+
+            SummaryResponse.Result r = qs.getResult().get(0);
+            QuoteSummary out = new QuoteSummary();
+
+            if (r.getSummaryDetail() != null) {
+                SummaryResponse.RawValue high = r.getSummaryDetail().getFiftyTwoWeekHigh();
+                SummaryResponse.RawValue low  = r.getSummaryDetail().getFiftyTwoWeekLow();
+                SummaryResponse.RawValue cap  = r.getSummaryDetail().getMarketCap();
+                out.setFiftyTwoWeekHigh(high != null ? high.getRaw() : 0);
+                out.setFiftyTwoWeekLow(low   != null ? low.getRaw()  : 0);
+                out.setMarketCap(cap          != null ? (long) cap.getRaw() : 0L);
+            }
+            if (r.getPrice() != null && out.getMarketCap() == 0) {
+                SummaryResponse.RawValue cap = r.getPrice().getMarketCap();
+                if (cap != null) out.setMarketCap((long) cap.getRaw());
+            }
+            return out;
+        } catch (Exception e) {
+            log.debug("quoteSummary failed for {}: {}", symbol, e.getMessage());
+            return null;
+        }
+    }
+
+    @lombok.Data
+    private static class QuoteSummary {
+        private double fiftyTwoWeekHigh;
+        private double fiftyTwoWeekLow;
+        private long   marketCap;
     }
 
     @Override
@@ -234,6 +277,42 @@ public class YahooFinanceSource implements MarketDataSource {
                 private List<Double> close;
                 private List<Long>   volume;
             }
+        }
+    }
+
+    // ---------- quoteSummary response POJOs ----------
+
+    @Data @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class SummaryResponse {
+        @JsonProperty("quoteSummary")
+        private QuoteSummaryWrapper quoteSummary;
+
+        @Data @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class QuoteSummaryWrapper {
+            private List<Result> result;
+        }
+
+        @Data @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class Result {
+            private SummaryDetail summaryDetail;
+            private Price price;
+        }
+
+        @Data @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class SummaryDetail {
+            private RawValue fiftyTwoWeekHigh;
+            private RawValue fiftyTwoWeekLow;
+            private RawValue marketCap;
+        }
+
+        @Data @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class Price {
+            private RawValue marketCap;
+        }
+
+        @Data @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class RawValue {
+            private double raw;
         }
     }
 }
