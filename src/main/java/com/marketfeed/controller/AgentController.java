@@ -26,7 +26,7 @@ public class AgentController {
             Examples:
             - "What's driving corn futures up this week?"
             - "How is the dollar index affecting gold right now?"
-            - "Give me a snapshot of energy markets today"
+            - "Give me a hollistic snapshot of energy markets today."
             - "Is the VIX showing elevated risk?"
 
             Optionally pass `symbols` to pin which tickers get pulled into context.
