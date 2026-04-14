@@ -1,0 +1,38 @@
+package com.marketfeed.config;
+
+import com.github.benmanes.caffeine.cache.Caffeine;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.caffeine.CaffeineCacheManager;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.concurrent.TimeUnit;
+
+@Configuration
+public class CacheConfig {
+
+    @Bean
+    public CacheManager cacheManager() {
+        CaffeineCacheManager manager = new CaffeineCacheManager();
+
+        // Different TTLs per cache name — this is a real pattern in data platforms
+        manager.registerCustomCache("quotes",
+                Caffeine.newBuilder().expireAfterWrite(60, TimeUnit.SECONDS).maximumSize(500).build());
+
+        manager.registerCustomCache("history",
+                Caffeine.newBuilder().expireAfterWrite(6, TimeUnit.HOURS).maximumSize(200).build());
+
+        manager.registerCustomCache("commodities",
+                Caffeine.newBuilder().expireAfterWrite(2, TimeUnit.MINUTES).maximumSize(50).build());
+
+        // FRED data — changes infrequently (monthly/quarterly releases)
+        manager.registerCustomCache("economic",
+                Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.HOURS).maximumSize(50).build());
+
+        // USDA WASDE — monthly report, safe to cache 12 hours
+        manager.registerCustomCache("wasde",
+                Caffeine.newBuilder().expireAfterWrite(12, TimeUnit.HOURS).maximumSize(10).build());
+
+        return manager;
+    }
+}

@@ -1,0 +1,33 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: market-feed
+  cache:
+    type: caffeine
+
+market-feed:
+  alpha-vantage:
+    api-key: ${ALPHA_VANTAGE_KEY:demo}
+    base-url: https://www.alphavantage.co/query
+    rate-limit-per-minute: 25
+  fred:
+    api-key: ${FRED_API_KEY:}
+    base-url: https://api.stlouisfed.org/fred
+  stream:
+    interval-seconds: 15   # how often WebSocket pushes updates
+  anthropic:
+    api-key: ${ANTHROPIC_API_KEY:}
+    model: claude-sonnet-4-5
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    display-request-duration: true
+
+logging:
+  level:
+    com.marketfeed: DEBUG
