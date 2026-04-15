@@ -50,5 +50,9 @@ public class Fundamentals {
     private Double ma50;
     private Double ma200;
 
+    // Live price (from YF price module — populated in screener)
+    private Double currentPrice;
+    private Double changePercent;
+
     private String error;
 }

@@ -140,6 +140,9 @@ public class FundamentalsService {
                     // Moving averages
                     .ma50(raw(sd.getFiftyDayAverage()))
                     .ma200(raw(sd.getTwoHundredDayAverage()))
+                    // Live price
+                    .currentPrice(raw(pr.getRegularMarketPrice()))
+                    .changePercent(raw(pr.getRegularMarketChangePercent()))
                     .build();
 
         } catch (Exception e) {
@@ -269,6 +272,8 @@ public class FundamentalsService {
         private String shortName;
         private String exchangeName;
         private RawValue marketCap;
+        private RawValue regularMarketPrice;
+        private RawValue regularMarketChangePercent;
     }
 
     @Data @JsonIgnoreProperties(ignoreUnknown = true)

@@ -61,6 +61,10 @@ public class CacheConfig {
         manager.registerCustomCache("earnings-calendar",
                 Caffeine.newBuilder().expireAfterWrite(30, TimeUnit.MINUTES).maximumSize(1).build());
 
+        // Screener universe — full set of fundamentals, cached 1 hour
+        manager.registerCustomCache("screener-universe",
+                Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.HOURS).maximumSize(1).build());
+
         return manager;
     }
 }
