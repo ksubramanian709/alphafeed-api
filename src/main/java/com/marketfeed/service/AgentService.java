@@ -2,6 +2,8 @@ package com.marketfeed.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.marketfeed.model.*;
+import com.marketfeed.model.BriefingResponse;
+import com.marketfeed.model.TickerBriefing;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -132,6 +134,141 @@ public class AgentService {
         } catch (Exception e) {
             log.warn("Failed to generate daily suggestions: {}", e.getMessage());
             return List.of();
+        }
+    }
+
+    // ─── Watchlist briefing ──────────────────────────────────────────────────────
+
+    public BriefingResponse getBriefing(List<String> symbolsRaw) {
+        if (anthropicKey == null || anthropicKey.isBlank()) {
+            return BriefingResponse.builder()
+                    .error("ANTHROPIC_API_KEY not configured")
+                    .generatedAt(Instant.now())
+                    .build();
+        }
+
+        List<String> symbols = symbolsRaw.stream()
+                .map(String::toUpperCase)
+                .distinct()
+                .limit(20)
+                .collect(Collectors.toList());
+
+        // Assemble per-ticker context (quote + news)
+        StringBuilder ctx = new StringBuilder();
+        ctx.append("Today's date: ").append(LocalDate.now()).append("\n\n");
+
+        Map<String, Quote> quoteMap = new LinkedHashMap<>();
+        for (String sym : symbols) {
+            ctx.append("[TICKER: ").append(sym).append("]\n");
+            try {
+                ApiResponse<Quote> qr = quoteService.getQuote(sym);
+                if (qr.getData() != null) {
+                    Quote q = qr.getData();
+                    quoteMap.put(sym, q);
+                    String sign = q.getChangePercent() >= 0 ? "+" : "";
+                    ctx.append("Price: $").append(String.format("%.2f", q.getPrice()))
+                            .append(" (").append(sign)
+                            .append(String.format("%.2f", q.getChangePercent())).append("%)\n");
+                    if (q.getName() != null) ctx.append("Name: ").append(q.getName()).append("\n");
+                }
+            } catch (Exception e) {
+                log.warn("Briefing: quote fetch failed for {}: {}", sym, e.getMessage());
+            }
+            try {
+                ApiResponse<List<NewsItem>> nr = newsService.getTickerNews(sym);
+                if (nr.getData() != null && !nr.getData().isEmpty()) {
+                    ctx.append("Recent news:\n");
+                    nr.getData().stream().limit(4)
+                            .forEach(n -> ctx.append("- ").append(n.getTitle()).append("\n"));
+                }
+            } catch (Exception e) {
+                log.warn("Briefing: news fetch failed for {}: {}", sym, e.getMessage());
+            }
+            ctx.append("\n");
+        }
+
+        String prompt = """
+                You are an expert financial analyst delivering a concise morning briefing.
+
+                Here is today's market data for the user's watchlist:
+
+                %s
+
+                For each ticker, write what the investor needs to know TODAY — specific to the data above.
+
+                Return ONLY a valid JSON array in this exact format, no other text:
+                [
+                  {
+                    "symbol": "TICKER",
+                    "sentiment": "bullish",
+                    "summary": "One sentence key takeaway with specific data point",
+                    "keyPoints": ["Point 1", "Point 2", "Point 3"]
+                  }
+                ]
+
+                Rules:
+                - sentiment must be exactly "bullish", "bearish", or "neutral"
+                - summary ≤ 18 words, must reference a specific price, %, or headline
+                - exactly 3 keyPoints, each ≤ 15 words, no generic filler
+                - same order as tickers listed above
+                """.formatted(ctx.toString());
+
+        try {
+            List<Map<String, Object>> messages = List.of(Map.of("role", "user", "content", prompt));
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("model",      model);
+            body.put("max_tokens", 2000);
+            body.put("messages",   messages);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("x-api-key",         anthropicKey);
+            headers.set("anthropic-version", "2023-06-01");
+
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    ANTHROPIC_URL, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+
+            if (resp.getBody() == null) throw new RuntimeException("Empty response from Claude");
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> content = (List<Map<String, Object>>) resp.getBody().get("content");
+            if (content == null || content.isEmpty()) throw new RuntimeException("No content in response");
+
+            String raw   = (String) content.get(0).get("text");
+            int    start = raw.indexOf('[');
+            int    end   = raw.lastIndexOf(']');
+            if (start == -1 || end == -1) throw new RuntimeException("No JSON array in response");
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> items = objectMapper.readValue(raw.substring(start, end + 1), List.class);
+
+            List<TickerBriefing> briefings = items.stream().map(item -> {
+                String sym = (String) item.get("symbol");
+                Quote  q   = quoteMap.get(sym);
+                @SuppressWarnings("unchecked")
+                List<String> kp = (List<String>) item.getOrDefault("keyPoints", List.of());
+                return TickerBriefing.builder()
+                        .symbol(sym)
+                        .name(q != null ? q.getName() : null)
+                        .price(q != null ? q.getPrice() : 0)
+                        .changePercent(q != null ? q.getChangePercent() : 0)
+                        .sentiment((String) item.getOrDefault("sentiment", "neutral"))
+                        .summary((String) item.getOrDefault("summary", ""))
+                        .keyPoints(kp)
+                        .build();
+            }).collect(Collectors.toList());
+
+            return BriefingResponse.builder()
+                    .briefings(briefings)
+                    .generatedAt(Instant.now())
+                    .build();
+
+        } catch (Exception e) {
+            log.error("Briefing generation failed: {}", e.getMessage(), e);
+            return BriefingResponse.builder()
+                    .error("Failed to generate briefing: " + e.getMessage())
+                    .generatedAt(Instant.now())
+                    .build();
         }
     }
 

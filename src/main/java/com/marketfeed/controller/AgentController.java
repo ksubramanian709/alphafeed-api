@@ -2,6 +2,8 @@ package com.marketfeed.controller;
 
 import com.marketfeed.model.AgentRequest;
 import com.marketfeed.model.AgentResponse;
+import com.marketfeed.model.BriefingRequest;
+import com.marketfeed.model.BriefingResponse;
 import com.marketfeed.service.AgentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -26,6 +28,25 @@ public class AgentController {
     )
     public ResponseEntity<List<String>> getSuggestions() {
         return ResponseEntity.ok(agentService.getDailySuggestions());
+    }
+
+    @PostMapping("/briefing")
+    @Operation(
+        summary = "Get AI morning briefing for a watchlist",
+        description = "Fetches live quotes and news for each symbol, then asks Claude to summarize " +
+                      "what each investor needs to know today. Returns sentiment, a one-sentence " +
+                      "summary, and 3 specific key points per ticker."
+    )
+    public ResponseEntity<BriefingResponse> briefing(@RequestBody BriefingRequest request) {
+        if (request.getSymbols() == null || request.getSymbols().isEmpty()) {
+            return ResponseEntity.badRequest().body(
+                    BriefingResponse.builder().error("symbols list is required").build());
+        }
+        BriefingResponse response = agentService.getBriefing(request.getSymbols());
+        if (response.getError() != null) {
+            return ResponseEntity.status(503).body(response);
+        }
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/query")
