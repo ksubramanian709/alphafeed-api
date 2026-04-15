@@ -45,6 +45,10 @@ public class CacheConfig {
         manager.registerCustomCache("fundamentals",
                 Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.HOURS).maximumSize(200).build());
 
+        // Options chains — refresh every 5 minutes during market hours
+        manager.registerCustomCache("options",
+                Caffeine.newBuilder().expireAfterWrite(5, TimeUnit.MINUTES).maximumSize(200).build());
+
         return manager;
     }
 }

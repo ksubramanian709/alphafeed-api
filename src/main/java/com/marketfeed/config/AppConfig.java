@@ -21,8 +21,8 @@ public class AppConfig {
     @Bean
     public RestTemplate restTemplate() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(5000);
-        factory.setReadTimeout(10000);
+        factory.setConnectTimeout(10000);
+        factory.setReadTimeout(90000);  // 90s — agent loop may make several Claude calls
         return new RestTemplate(factory);
     }
 }
