@@ -53,6 +53,14 @@ public class CacheConfig {
         manager.registerCustomCache("suggestions",
                 Caffeine.newBuilder().expireAfterWrite(4, TimeUnit.HOURS).maximumSize(1).build());
 
+        // Earnings history per symbol — quarterly data, cache 1 hour
+        manager.registerCustomCache("earnings",
+                Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.HOURS).maximumSize(300).build());
+
+        // Upcoming earnings calendar — refresh every 30 minutes
+        manager.registerCustomCache("earnings-calendar",
+                Caffeine.newBuilder().expireAfterWrite(30, TimeUnit.MINUTES).maximumSize(1).build());
+
         return manager;
     }
 }
