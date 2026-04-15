@@ -67,6 +67,74 @@ public class AgentService {
         }
     }
 
+    // ─── Daily suggestions ───────────────────────────────────────────────────────
+
+    @org.springframework.cache.annotation.Cacheable(value = "suggestions", key = "'daily'")
+    public List<String> getDailySuggestions() {
+        if (anthropicKey == null || anthropicKey.isBlank()) return List.of();
+        try {
+            // Pull today's market headlines
+            ApiResponse<List<com.marketfeed.model.NewsItem>> newsResp = newsService.getMarketNews();
+            String headlines = "";
+            if (newsResp.getData() != null && !newsResp.getData().isEmpty()) {
+                headlines = newsResp.getData().stream()
+                        .limit(12)
+                        .map(n -> "- " + n.getTitle())
+                        .collect(java.util.stream.Collectors.joining("\n"));
+            }
+
+            String prompt = """
+                    Today's market headlines:
+                    %s
+
+                    Based on these headlines, generate exactly 6 questions a retail investor would want to ask today.
+                    Rules:
+                    - Each question must reference a specific event, company, or trend from the headlines above
+                    - Mix question types: "why is X moving?", "what does Y mean for markets?", "how should I think about Z?"
+                    - Keep each question under 12 words
+                    - No generic questions — every question must be specific to today's news
+                    - Return ONLY a JSON array of 6 strings, no other text
+
+                    Example format: ["Question 1?", "Question 2?", ...]
+                    """.formatted(headlines);
+
+            List<Map<String, Object>> messages = List.of(Map.of("role", "user", "content", prompt));
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("model", model);
+            body.put("max_tokens", 400);
+            body.put("messages", messages);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("x-api-key", anthropicKey);
+            headers.set("anthropic-version", "2023-06-01");
+
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    ANTHROPIC_URL, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+
+            if (resp.getBody() == null) return List.of();
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> content = (List<Map<String, Object>>) resp.getBody().get("content");
+            if (content == null || content.isEmpty()) return List.of();
+
+            String raw = (String) content.get(0).get("text");
+            if (raw == null || raw.isBlank()) return List.of();
+
+            // Extract the JSON array from the response
+            int start = raw.indexOf('[');
+            int end   = raw.lastIndexOf(']');
+            if (start == -1 || end == -1) return List.of();
+
+            @SuppressWarnings("unchecked")
+            List<String> suggestions = objectMapper.readValue(raw.substring(start, end + 1), List.class);
+            return suggestions != null ? suggestions : List.of();
+
+        } catch (Exception e) {
+            log.warn("Failed to generate daily suggestions: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
     // ─── Agentic loop ────────────────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")

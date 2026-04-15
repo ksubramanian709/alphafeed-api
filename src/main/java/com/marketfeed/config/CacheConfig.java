@@ -49,6 +49,10 @@ public class CacheConfig {
         manager.registerCustomCache("options",
                 Caffeine.newBuilder().expireAfterWrite(5, TimeUnit.MINUTES).maximumSize(200).build());
 
+        // Daily AI-generated suggestions — refresh every 4 hours
+        manager.registerCustomCache("suggestions",
+                Caffeine.newBuilder().expireAfterWrite(4, TimeUnit.HOURS).maximumSize(1).build());
+
         return manager;
     }
 }

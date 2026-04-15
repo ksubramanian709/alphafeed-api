@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/v1/agent")
 @RequiredArgsConstructor
@@ -16,6 +18,15 @@ import org.springframework.web.bind.annotation.*;
 public class AgentController {
 
     private final AgentService agentService;
+
+    @GetMapping("/suggestions")
+    @Operation(
+        summary = "Get AI-generated daily question suggestions",
+        description = "Returns 6 questions generated from today's market headlines. Refreshes every 4 hours."
+    )
+    public ResponseEntity<List<String>> getSuggestions() {
+        return ResponseEntity.ok(agentService.getDailySuggestions());
+    }
 
     @PostMapping("/query")
     @Operation(
