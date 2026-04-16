@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.net.http.HttpResponse;
@@ -23,6 +24,7 @@ public class ScreenerService {
     private final ObjectMapper mapper = new ObjectMapper();
 
     private static final int PAGE_SIZE = 250;
+    private static final int PRICE_BATCH = 200;
 
     // Yahoo Finance predefined sector screener IDs → human-readable sector names
     private static final Map<String, String> SECTORS = Map.ofEntries(
@@ -43,6 +45,16 @@ public class ScreenerService {
         "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved" +
         "?formatted=false&lang=en-US&region=US&count=%d&offset=%d&scrIds=%s&crumb=%s";
 
+    private static final String BULK_QUOTE_URL =
+        "https://query1.finance.yahoo.com/v7/finance/quote?symbols=%s" +
+        "&fields=regularMarketPrice,regularMarketChangePercent&crumb=%s";
+
+    // Live price overlay: symbol → [price, changePercent]
+    private final ConcurrentHashMap<String, double[]> priceCache = new ConcurrentHashMap<>();
+
+    // Shared thread pool for both universe fetch and price refresh
+    private final ExecutorService pool = Executors.newFixedThreadPool(16);
+
     // ── Universe fetch ────────────────────────────────────────────────────────
 
     @Cacheable(value = "screener-universe", key = "'all'", unless = "#result == null || #result.isEmpty()")
@@ -54,7 +66,6 @@ public class ScreenerService {
         }
 
         log.info("Loading screener universe from Yahoo Finance sector screens…");
-        ExecutorService pool = Executors.newFixedThreadPool(12);
 
         try {
             // First pass: get page 0 for each sector to learn total counts
@@ -94,8 +105,68 @@ public class ScreenerService {
             log.info("Screener universe loaded: {} stocks across {} sectors", result.size(), SECTORS.size());
             return result;
 
-        } finally {
-            pool.shutdown();
+        } catch (Exception e) {
+            log.error("Failed to load screener universe: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    // ── Background price refresh every 60 seconds ─────────────────────────────
+
+    @Scheduled(fixedDelay = 60_000, initialDelay = 90_000)
+    public void refreshPrices() {
+        List<Fundamentals> universe;
+        try {
+            universe = getUniverse();
+        } catch (Exception e) {
+            return;
+        }
+        if (universe.isEmpty()) return;
+
+        String crumb = crumbService.getCrumb();
+        if (crumb == null) return;
+
+        List<String> symbols = universe.stream().map(Fundamentals::getSymbol).toList();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+        for (int i = 0; i < symbols.size(); i += PRICE_BATCH) {
+            List<String> batch = symbols.subList(i, Math.min(i + PRICE_BATCH, symbols.size()));
+            String syms = String.join(",", batch);
+            final String finalCrumb = crumb;
+            futures.add(CompletableFuture.runAsync(() -> fetchPriceBatch(syms, finalCrumb), pool));
+        }
+
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                             .get(30, TimeUnit.SECONDS);
+            log.debug("Price cache refreshed: {} symbols", priceCache.size());
+        } catch (Exception e) {
+            log.warn("Price refresh timed out: {}", e.getMessage());
+        }
+    }
+
+    private void fetchPriceBatch(String symbols, String crumb) {
+        try {
+            String url = String.format(BULK_QUOTE_URL, symbols, crumb);
+            HttpResponse<String> resp = crumbService.getHttpClient()
+                    .send(crumbService.get(url), HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() == 401) {
+                crumbService.invalidate();
+                return;
+            }
+
+            YfQuoteResponse body = mapper.readValue(resp.body(), YfQuoteResponse.class);
+            if (body.getQuoteResponse() == null || body.getQuoteResponse().getResult() == null) return;
+
+            for (YfBulkQuote q : body.getQuoteResponse().getResult()) {
+                if (q.getSymbol() == null) continue;
+                double price  = q.getRegularMarketPrice()         != null ? q.getRegularMarketPrice()         : 0;
+                double change = q.getRegularMarketChangePercent() != null ? q.getRegularMarketChangePercent() : 0;
+                if (price > 0) priceCache.put(q.getSymbol(), new double[]{price, change});
+            }
+        } catch (Exception e) {
+            log.warn("Price batch fetch failed for batch starting {}: {}", symbols.split(",")[0], e.getMessage());
         }
     }
 
@@ -114,19 +185,19 @@ public class ScreenerService {
 
             YfScreenerResponse body = mapper.readValue(resp.body(), YfScreenerResponse.class);
             List<YfQuote> quotes = Optional.ofNullable(body.getFinance())
-                .map(f -> f.getResult())
+                .map(YfFinanceWrapper::getResult)
                 .filter(r -> !r.isEmpty())
                 .map(r -> r.get(0).getQuotes())
                 .orElse(List.of());
 
             int total = Optional.ofNullable(body.getFinance())
-                .map(f -> f.getResult())
+                .map(YfFinanceWrapper::getResult)
                 .filter(r -> !r.isEmpty())
                 .map(r -> r.get(0).getTotal())
                 .orElse(0);
 
             List<Fundamentals> stocks = quotes.stream()
-                .filter(q -> q.getSymbol() != null && q.getMarketCap() != null && q.getMarketCap() > 0)
+                .filter(q -> q.getSymbol() != null)
                 .map(q -> mapToFundamentals(q, sector))
                 .collect(Collectors.toList());
 
@@ -141,19 +212,23 @@ public class ScreenerService {
     // ── Map YF screener quote to Fundamentals model ───────────────────────────
 
     private Fundamentals mapToFundamentals(YfQuote q, String sector) {
+        // marketCap: YF screener may return as Double or Long; use whichever is non-null
+        Double cap = q.getMarketCap() != null ? q.getMarketCap()
+                   : q.getRegularMarketCap() != null ? q.getRegularMarketCap() : null;
+
         return Fundamentals.builder()
                 .symbol(q.getSymbol())
                 .name(q.getLongName() != null ? q.getLongName() : q.getShortName())
                 .sector(sector)
                 .currentPrice(q.getRegularMarketPrice())
                 .changePercent(q.getRegularMarketChangePercent())
-                .marketCap(q.getMarketCap())
+                .marketCap(cap != null && cap > 0 ? cap.longValue() : null)
                 .peRatio(q.getTrailingPE())
                 .forwardPE(q.getForwardPE())
                 .eps(q.getEpsTrailingTwelveMonths())
                 .priceToBook(q.getPriceToBook())
                 .dividendYield(q.getDividendYield() != null && q.getDividendYield() > 0
-                    ? q.getDividendYield() / 100.0  // YF returns yield as percent (e.g. 1.5 = 1.5%)
+                    ? q.getDividendYield() / 100.0
                     : null)
                 .beta(q.getBeta())
                 .ma50(q.getFiftyDayAverage())
@@ -168,15 +243,22 @@ public class ScreenerService {
         return getUniverse().stream()
             .filter(f -> p.sector()        == null || p.sector().isBlank()
                          || p.sector().equalsIgnoreCase(f.getSector()))
-            .filter(f -> p.minPE()         == null || (f.getPeRatio()     != null && f.getPeRatio()     >= p.minPE()))
-            .filter(f -> p.maxPE()         == null || (f.getPeRatio()     != null && f.getPeRatio()     <= p.maxPE()))
-            .filter(f -> p.minMarketCapB() == null || (f.getMarketCap()   != null && f.getMarketCap()   >= (long)(p.minMarketCapB() * 1e9)))
-            .filter(f -> p.maxMarketCapB() == null || (f.getMarketCap()   != null && f.getMarketCap()   <= (long)(p.maxMarketCapB() * 1e9)))
+            .filter(f -> p.minPE()         == null || (f.getPeRatio()      != null && f.getPeRatio()      >= p.minPE()))
+            .filter(f -> p.maxPE()         == null || (f.getPeRatio()      != null && f.getPeRatio()      <= p.maxPE()))
+            .filter(f -> p.minMarketCapB() == null || (f.getMarketCap()    != null && f.getMarketCap()    >= (long)(p.minMarketCapB() * 1e9)))
+            .filter(f -> p.maxMarketCapB() == null || (f.getMarketCap()    != null && f.getMarketCap()    <= (long)(p.maxMarketCapB() * 1e9)))
             .filter(f -> p.minDivYield()   == null || (f.getDividendYield()!= null && f.getDividendYield() >= p.minDivYield() / 100.0))
-            .filter(f -> p.minEps()        == null || (f.getEps()         != null && f.getEps()         >= p.minEps()))
-            .filter(f -> p.maxBeta()       == null || (f.getBeta()        != null && f.getBeta()        <= p.maxBeta()))
+            .filter(f -> p.minEps()        == null || (f.getEps()          != null && f.getEps()          >= p.minEps()))
+            .filter(f -> p.maxBeta()       == null || (f.getBeta()         != null && f.getBeta()         <= p.maxBeta()))
+            .map(this::overlayLivePrice)
             .sorted(comparator(p.sortBy(), p.sortDesc()))
             .collect(Collectors.toList());
+    }
+
+    private Fundamentals overlayLivePrice(Fundamentals f) {
+        double[] live = priceCache.get(f.getSymbol());
+        if (live == null) return f;
+        return f.toBuilder().currentPrice(live[0]).changePercent(live[1]).build();
     }
 
     public List<String> getSectors() {
@@ -243,7 +325,8 @@ public class ScreenerService {
         private String  longName;
         private Double  regularMarketPrice;
         private Double  regularMarketChangePercent;
-        private Long    marketCap;
+        private Double  marketCap;           // YF may return as float — use Double
+        private Double  regularMarketCap;    // fallback field name
         private Double  trailingPE;
         private Double  forwardPE;
         private Double  epsTrailingTwelveMonths;
@@ -253,5 +336,24 @@ public class ScreenerService {
         private Double  fiftyDayAverage;
         private Double  twoHundredDayAverage;
         private Double  lastCloseTevEbitLtm;
+    }
+
+    // ── Bulk quote response DTOs ──────────────────────────────────────────────
+
+    @Data @JsonIgnoreProperties(ignoreUnknown = true)
+    static class YfQuoteResponse {
+        private YfQuoteWrapper quoteResponse;
+    }
+
+    @Data @JsonIgnoreProperties(ignoreUnknown = true)
+    static class YfQuoteWrapper {
+        private List<YfBulkQuote> result;
+    }
+
+    @Data @JsonIgnoreProperties(ignoreUnknown = true)
+    static class YfBulkQuote {
+        private String symbol;
+        private Double regularMarketPrice;
+        private Double regularMarketChangePercent;
     }
 }
