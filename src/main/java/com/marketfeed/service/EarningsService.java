@@ -150,6 +150,9 @@ public class EarningsService {
                     Double estimate = q.getEpsForward() != null ? q.getEpsForward()
                                     : q.getEpsCurrentYear();
 
+                    Long cap = q.getMarketCap() != null && q.getMarketCap() > 0
+                            ? q.getMarketCap().longValue() : null;
+
                     items.add(EarningsCalendarItem.builder()
                             .symbol(q.getSymbol())
                             .name(name)
@@ -157,6 +160,7 @@ public class EarningsService {
                             .fiscalDateEnding(reportDate.toString())
                             .estimate(estimate)
                             .currency("USD")
+                            .marketCap(cap)
                             .build());
                 }
 
@@ -250,5 +254,6 @@ public class EarningsService {
         private Long    earningsTimestampEnd;
         private Double  epsForward;
         private Double  epsCurrentYear;
+        private Double  marketCap;
     }
 }

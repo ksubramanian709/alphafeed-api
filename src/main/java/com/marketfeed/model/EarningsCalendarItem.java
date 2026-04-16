@@ -12,4 +12,5 @@ public class EarningsCalendarItem {
     private String fiscalDateEnding;
     private Double estimate;
     private String currency;
+    private Long   marketCap;
 }
