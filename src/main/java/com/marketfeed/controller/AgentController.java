@@ -70,7 +70,7 @@ public class AgentController {
     }
 
     @PostMapping("/briefing")
-    @Operation(summary = "Get AI morning briefing for a watchlist")
+    @Operation(summary = "Get AI briefing for a watchlist")
     public ResponseEntity<BriefingResponse> briefing(@RequestBody BriefingRequest request,
                                                       HttpServletRequest httpReq) {
         String ip = clientIp(httpReq);

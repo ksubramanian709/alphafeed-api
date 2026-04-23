@@ -4,9 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.marketfeed.model.ApiResponse;
 import com.marketfeed.model.Quote;
+import com.marketfeed.model.QuoteUpdatedEvent;
 import com.marketfeed.service.QuoteService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -77,8 +79,35 @@ public class QuoteStreamHandler extends TextWebSocketHandler {
     }
 
     /**
-     * Every N seconds, push fresh quotes to all subscribed sessions.
-     * Interval is configured in application.yml → market-feed.stream.interval-seconds
+     * Real-time push: fired immediately when Binance (or any future WS source) publishes a tick.
+     * Only pushes to sessions that have subscribed to the symbol — no polling, no cache.
+     */
+    @EventListener
+    public void onQuoteUpdated(QuoteUpdatedEvent event) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("type", "quote");
+        payload.put("symbol", event.getSymbol());
+        payload.put("price", event.getPrice());
+        payload.put("change", event.getChange());
+        payload.put("changePercent", event.getChangePercent());
+        payload.put("high", event.getHigh());
+        payload.put("low", event.getLow());
+        payload.put("volume", event.getVolume());
+        payload.put("source", event.getSource());
+        payload.put("timestamp", event.getTimestamp().toString());
+
+        subscriptions.forEach((sessionId, symbols) -> {
+            if (!symbols.contains(event.getSymbol())) return;
+            WebSocketSession session = sessions.get(sessionId);
+            if (session != null && session.isOpen()) {
+                sendMessage(session, payload);
+            }
+        });
+    }
+
+    /**
+     * Scheduled fallback: pushes quotes for equities, forex, commodities, and indices
+     * that have no real-time WS feed (Yahoo Finance is REST-only).
      */
     @Scheduled(fixedDelayString = "${market-feed.stream.interval-seconds:15}000")
     public void broadcastQuotes() {

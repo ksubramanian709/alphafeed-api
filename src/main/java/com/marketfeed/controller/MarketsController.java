@@ -47,6 +47,19 @@ public class MarketsController {
         "CL=F",    "Oil (WTI)"
     );
 
+    private static final Map<String, String> CATEGORIES = Map.of(
+        "^GSPC",   "indices",
+        "^IXIC",   "indices",
+        "^DJI",    "indices",
+        "^RUT",    "indices",
+        "^VIX",    "indices",
+        "^TNX",    "indices",
+        "BTC-USD", "crypto",
+        "ETH-USD", "crypto",
+        "GC=F",    "commodities",
+        "CL=F",    "commodities"
+    );
+
     @GetMapping("/overview")
     @Operation(summary = "Multi-market overview strip",
                description = "Returns quotes for S&P 500, Nasdaq, Dow, Russell 2000, VIX, 10Y Yield, Bitcoin, Ethereum, Gold, and Oil. Cached 60s.")
@@ -63,6 +76,7 @@ public class MarketsController {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("symbol",        symbol);
                 item.put("label",         LABELS.getOrDefault(symbol, symbol));
+                item.put("category",      CATEGORIES.getOrDefault(symbol, "indices"));
                 item.put("price",         q.getPrice());
                 item.put("change",        q.getChange());
                 item.put("changePercent", q.getChangePercent());

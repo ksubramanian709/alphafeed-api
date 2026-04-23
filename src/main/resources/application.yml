@@ -17,7 +17,10 @@ market-feed:
     api-key: ${FRED_API_KEY:}
     base-url: https://api.stlouisfed.org/fred
   stream:
-    interval-seconds: 15   # how often WebSocket pushes updates
+    interval-seconds: 15   # how often WebSocket pushes updates for non-crypto (REST-only sources)
+  binance:
+    enabled: true
+    symbols: btcusdt,ethusdt,solusdt,xrpusdt,bnbusdt,dogeusdt,adausdt,avaxusdt,linkusdt,maticusdt
   anthropic:
     api-key: ${ANTHROPIC_API_KEY:}
     model: claude-sonnet-4-6
