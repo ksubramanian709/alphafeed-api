@@ -181,6 +181,25 @@ public class SecEdgarService {
         return text.substring(bestStart, end).trim();
     }
 
+    // ─── 8-K text extraction (for earnings releases) ─────────────────────────────
+
+    public String fetchEarningsText(FilingInfo filing) {
+        try {
+            ResponseEntity<String> resp = restTemplate.exchange(
+                    filing.getFilingUrl(), HttpMethod.GET,
+                    new HttpEntity<>(edgarHeaders()), String.class);
+            if (resp.getBody() == null) return "";
+
+            Document doc = Jsoup.parse(resp.getBody());
+            doc.select("script, style").remove();
+            String text = doc.text();
+            return text.length() > 5000 ? text.substring(0, 5000) : text;
+        } catch (Exception e) {
+            log.warn("Failed to fetch 8-K text {}: {}", filing.getFilingUrl(), e.getMessage());
+            return "";
+        }
+    }
+
     // ─── Headers ──────────────────────────────────────────────────────────────────
 
     private HttpHeaders edgarHeaders() {

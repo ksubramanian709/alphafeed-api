@@ -1,6 +1,7 @@
 package com.marketfeed.controller;
 
 import com.marketfeed.model.*;
+import com.marketfeed.service.EarningsInsightService;
 import com.marketfeed.service.FilingAnalysisService;
 import com.marketfeed.service.SecEdgarService;
 import com.marketfeed.service.XbrlService;
@@ -17,6 +18,7 @@ public class ResearchController {
     private final SecEdgarService       edgarService;
     private final FilingAnalysisService analysisService;
     private final XbrlService           xbrlService;
+    private final EarningsInsightService earningsInsightService;
 
     @GetMapping("/{symbol}/filings")
     public ApiResponse<List<FilingInfo>> filings(
@@ -43,5 +45,11 @@ public class ResearchController {
     public ApiResponse<FinancialTimeseries> financials(@PathVariable String symbol) {
         FinancialTimeseries data = xbrlService.getFinancials(symbol.toUpperCase());
         return ApiResponse.<FinancialTimeseries>builder().data(data).build();
+    }
+
+    @GetMapping("/{symbol}/earnings-insights")
+    public ApiResponse<EarningsInsight> earningsInsights(@PathVariable String symbol) {
+        EarningsInsight data = earningsInsightService.getEarningsInsights(symbol.toUpperCase());
+        return ApiResponse.<EarningsInsight>builder().data(data).build();
     }
 }

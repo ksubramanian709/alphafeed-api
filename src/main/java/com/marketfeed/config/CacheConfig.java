@@ -81,6 +81,10 @@ public class CacheConfig {
         manager.registerCustomCache("research-financials",
                 Caffeine.newBuilder().expireAfterWrite(12, TimeUnit.HOURS).maximumSize(200).build());
 
+        // 8-K earnings cross-quarter AI analysis — stable, cache 12 hours
+        manager.registerCustomCache("research-earnings-insights",
+                Caffeine.newBuilder().expireAfterWrite(12, TimeUnit.HOURS).maximumSize(200).build());
+
         return manager;
     }
 }
