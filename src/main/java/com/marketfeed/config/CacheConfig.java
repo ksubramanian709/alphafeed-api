@@ -77,6 +77,10 @@ public class CacheConfig {
         manager.registerCustomCache("research-compare",
                 Caffeine.newBuilder().expireAfterWrite(12, TimeUnit.HOURS).maximumSize(200).build());
 
+        // XBRL structured financials — annual data, very stable
+        manager.registerCustomCache("research-financials",
+                Caffeine.newBuilder().expireAfterWrite(12, TimeUnit.HOURS).maximumSize(200).build());
+
         return manager;
     }
 }

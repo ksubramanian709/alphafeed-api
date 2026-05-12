@@ -3,6 +3,7 @@ package com.marketfeed.controller;
 import com.marketfeed.model.*;
 import com.marketfeed.service.FilingAnalysisService;
 import com.marketfeed.service.SecEdgarService;
+import com.marketfeed.service.XbrlService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,6 +16,7 @@ public class ResearchController {
 
     private final SecEdgarService       edgarService;
     private final FilingAnalysisService analysisService;
+    private final XbrlService           xbrlService;
 
     @GetMapping("/{symbol}/filings")
     public ApiResponse<List<FilingInfo>> filings(
@@ -35,5 +37,11 @@ public class ResearchController {
     public ApiResponse<YoyComparison> compare(@PathVariable String symbol) {
         YoyComparison data = analysisService.compareYoY(symbol.toUpperCase());
         return ApiResponse.<YoyComparison>builder().data(data).build();
+    }
+
+    @GetMapping("/{symbol}/financials")
+    public ApiResponse<FinancialTimeseries> financials(@PathVariable String symbol) {
+        FinancialTimeseries data = xbrlService.getFinancials(symbol.toUpperCase());
+        return ApiResponse.<FinancialTimeseries>builder().data(data).build();
     }
 }
