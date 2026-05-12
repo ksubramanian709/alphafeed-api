@@ -26,7 +26,7 @@ public class ScreenerService {
     private static final int PAGE_SIZE = 250;
     private static final int PRICE_BATCH = 200;
 
-    // Yahoo Finance predefined sector screener IDs → human-readable sector names
+    // Yahoo Finance predefined sector ID's ---- sector names
     private static final Map<String, String> SECTORS = Map.ofEntries(
         Map.entry("ms_technology",               "Technology"),
         Map.entry("ms_financial_services",       "Financial Services"),

@@ -15,7 +15,7 @@ public class CacheConfig {
     public CacheManager cacheManager() {
         CaffeineCacheManager manager = new CaffeineCacheManager();
 
-        // Different TTLs per cache name — this is a real pattern in data platforms
+        // Different TTLs per cache name 
         manager.registerCustomCache("quotes",
                 Caffeine.newBuilder().expireAfterWrite(60, TimeUnit.SECONDS).maximumSize(500).build());
 
@@ -64,6 +64,18 @@ public class CacheConfig {
         // Screener universe — full set of fundamentals, cached 1 hour
         manager.registerCustomCache("screener-universe",
                 Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.HOURS).maximumSize(1).build());
+
+        // SEC EDGAR research — 10-K filings list per ticker
+        manager.registerCustomCache("research-filings",
+                Caffeine.newBuilder().expireAfterWrite(6, TimeUnit.HOURS).maximumSize(200).build());
+
+        // SEC 10-K AI analysis — stable, cache 12 hours
+        manager.registerCustomCache("research-analysis",
+                Caffeine.newBuilder().expireAfterWrite(12, TimeUnit.HOURS).maximumSize(200).build());
+
+        // Year-over-year comparison — same stability as analysis
+        manager.registerCustomCache("research-compare",
+                Caffeine.newBuilder().expireAfterWrite(12, TimeUnit.HOURS).maximumSize(200).build());
 
         return manager;
     }

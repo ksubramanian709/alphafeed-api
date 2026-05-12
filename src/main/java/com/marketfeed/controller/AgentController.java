@@ -27,7 +27,7 @@ public class AgentController {
 
     private final AgentService agentService;
 
-    // ── Rate limiting ────────────────────────────────────────────────────────────
+    // Rate Limiting ---------------------------------------
     private static final int    MAX_REQUESTS_PER_HOUR = 10;
     private static final int    MAX_QUESTION_LENGTH   = 500;
     private static final int    MAX_HISTORY_TURNS     = 6;   // last N turns sent to Claude
@@ -70,7 +70,7 @@ public class AgentController {
     }
 
     @PostMapping("/briefing")
-    @Operation(summary = "Get AI briefing for a watchlist")
+    @Operation(summary = "Get AI daily briefing for a watchlist")
     public ResponseEntity<BriefingResponse> briefing(@RequestBody BriefingRequest request,
                                                       HttpServletRequest httpReq) {
         String ip = clientIp(httpReq);

@@ -25,7 +25,6 @@ public class CommoditiesController {
 
     private final QuoteService quoteService;
 
-    // Barchart's core verticals — energy, metals, grains
     private static final Map<String, List<String>> FUTURES = Map.of(
         "energy",  List.of("CL=F", "NG=F", "BZ=F"),   // Crude, NatGas, Brent
         "metals",  List.of("GC=F", "SI=F", "HG=F"),   // Gold, Silver, Copper

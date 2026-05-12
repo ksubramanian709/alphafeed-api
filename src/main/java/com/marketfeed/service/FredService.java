@@ -28,7 +28,7 @@ public class FredService {
     @Value("${market-feed.fred.base-url}")
     private String baseUrl;
 
-    // The indicators Barchart's users care about most
+    // Indicators
     public static final Map<String, SeriesMeta> SERIES = new LinkedHashMap<>();
     static {
         SERIES.put("FEDFUNDS", new SeriesMeta("Federal Funds Rate",        "Percent"));
