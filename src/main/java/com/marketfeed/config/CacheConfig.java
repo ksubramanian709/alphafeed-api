@@ -85,6 +85,10 @@ public class CacheConfig {
         manager.registerCustomCache("research-earnings-insights",
                 Caffeine.newBuilder().expireAfterWrite(12, TimeUnit.HOURS).maximumSize(200).build());
 
+        // WSB sentiment — Claude-scored daily aggregation, refresh every 24 hours
+        manager.registerCustomCache("sentiment",
+                Caffeine.newBuilder().expireAfterWrite(24, TimeUnit.HOURS).maximumSize(100).build());
+
         return manager;
     }
 }
