@@ -69,6 +69,135 @@ public class AgentService {
         }
     }
 
+    // ─── Per-symbol AI insights ──────────────────────────────────────────────────
+
+    @org.springframework.cache.annotation.Cacheable(value = "agent-insights", key = "#symbol + '_' + #assetType")
+    public InsightResponse getInsights(String symbol, String assetType) {
+        if (anthropicKey == null || anthropicKey.isBlank()) {
+            return InsightResponse.builder().symbol(symbol)
+                    .error("ANTHROPIC_API_KEY not configured").generatedAt(Instant.now()).build();
+        }
+
+        // Fetch live quote
+        StringBuilder ctx = new StringBuilder();
+        try {
+            ApiResponse<Quote> qr = quoteService.getQuote(symbol);
+            if (qr.getData() != null) {
+                Quote q = qr.getData();
+                String sign = q.getChangePercent() >= 0 ? "+" : "";
+                ctx.append("Price: $").append(String.format("%.2f", q.getPrice()))
+                        .append(" (").append(sign).append(String.format("%.2f", q.getChangePercent())).append("% today)\n");
+                if (q.getFiftyTwoWeekHigh() > 0)
+                    ctx.append("52-week range: $").append(String.format("%.2f", q.getFiftyTwoWeekLow()))
+                            .append(" – $").append(String.format("%.2f", q.getFiftyTwoWeekHigh())).append("\n");
+                if (q.getMarketCap() > 0)
+                    ctx.append("Market cap: $").append(String.format("%.1fB", q.getMarketCap() / 1e9)).append("\n");
+            }
+        } catch (Exception e) {
+            log.warn("Insights: quote fetch failed for {}: {}", symbol, e.getMessage());
+        }
+
+        // Fetch recent news
+        try {
+            ApiResponse<List<NewsItem>> nr = newsService.getTickerNews(symbol);
+            if (nr.getData() != null && !nr.getData().isEmpty()) {
+                ctx.append("Recent news:\n");
+                nr.getData().stream().limit(5).forEach(n -> ctx.append("- ").append(n.getTitle()).append("\n"));
+            }
+        } catch (Exception e) {
+            log.warn("Insights: news fetch failed for {}: {}", symbol, e.getMessage());
+        }
+
+        String role = switch (assetType) {
+            case "INDEX"  -> "macro strategist";
+            case "CRYPTO" -> "crypto analyst";
+            case "FUTURE" -> "commodities analyst";
+            default       -> "equity analyst";
+        };
+        String bullLabel = switch (assetType) {
+            case "INDEX"  -> "risk-on factors";
+            case "FUTURE" -> "demand tailwinds";
+            default       -> "bull case factors";
+        };
+        String bearLabel = switch (assetType) {
+            case "INDEX"  -> "risk-off factors";
+            case "FUTURE" -> "supply headwinds";
+            default       -> "bear case factors";
+        };
+
+        String prompt = """
+                You are an expert %s analyzing %s.
+
+                Live data:
+                %s
+                Return ONLY a valid JSON object — no markdown, no explanation, no code fences:
+                {
+                  "symbol": "%s",
+                  "sentiment": "bullish",
+                  "summary": "One sentence 20 words max referencing specific price or news",
+                  "bullPoints": ["Point 1", "Point 2", "Point 3"],
+                  "bearPoints": ["Point 1", "Point 2", "Point 3"],
+                  "keyRisk": "Biggest risk in 15 words max",
+                  "catalyst": "Next likely positive catalyst in 15 words max"
+                }
+
+                Rules:
+                - sentiment must be exactly "bullish", "bearish", or "neutral"
+                - bullPoints are %s — 3 items, 12 words each, no generic filler
+                - bearPoints are %s — 3 items, 12 words each, no generic filler
+                """.formatted(role, symbol, ctx.toString(), symbol, bullLabel, bearLabel);
+
+        try {
+            List<Map<String, Object>> messages = List.of(Map.of("role", "user", "content", prompt));
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("model",      model);
+            body.put("max_tokens", 600);
+            body.put("messages",   messages);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("x-api-key",         anthropicKey);
+            headers.set("anthropic-version", "2023-06-01");
+
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    ANTHROPIC_URL, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            if (resp.getBody() == null) throw new RuntimeException("Empty response from Claude");
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> content = (List<Map<String, Object>>) resp.getBody().get("content");
+            if (content == null || content.isEmpty()) throw new RuntimeException("No content in response");
+
+            String raw   = (String) content.get(0).get("text");
+            int    start = raw.indexOf('{');
+            int    end   = raw.lastIndexOf('}');
+            if (start == -1 || end == -1) throw new RuntimeException("No JSON object in response");
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> item = objectMapper.readValue(raw.substring(start, end + 1), Map.class);
+
+            @SuppressWarnings("unchecked")
+            List<String> bullPoints = (List<String>) item.getOrDefault("bullPoints", List.of());
+            @SuppressWarnings("unchecked")
+            List<String> bearPoints = (List<String>) item.getOrDefault("bearPoints", List.of());
+
+            return InsightResponse.builder()
+                    .symbol(symbol)
+                    .sentiment((String) item.getOrDefault("sentiment", "neutral"))
+                    .summary((String) item.getOrDefault("summary", ""))
+                    .bullPoints(bullPoints)
+                    .bearPoints(bearPoints)
+                    .keyRisk((String) item.getOrDefault("keyRisk", ""))
+                    .catalyst((String) item.getOrDefault("catalyst", ""))
+                    .generatedAt(Instant.now())
+                    .build();
+
+        } catch (Exception e) {
+            log.error("Insights generation failed for {}: {}", symbol, e.getMessage(), e);
+            return InsightResponse.builder().symbol(symbol)
+                    .error("Failed to generate insights").generatedAt(Instant.now()).build();
+        }
+    }
+
     // ─── Daily suggestions ───────────────────────────────────────────────────────
 
     @org.springframework.cache.annotation.Cacheable(value = "suggestions", key = "'daily'")

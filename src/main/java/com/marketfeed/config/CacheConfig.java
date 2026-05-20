@@ -85,6 +85,10 @@ public class CacheConfig {
         manager.registerCustomCache("research-earnings-insights",
                 Caffeine.newBuilder().expireAfterWrite(12, TimeUnit.HOURS).maximumSize(200).build());
 
+        // Per-symbol AI insights panel — cache 4 hours
+        manager.registerCustomCache("agent-insights",
+                Caffeine.newBuilder().expireAfterWrite(4, TimeUnit.HOURS).maximumSize(500).build());
+
         return manager;
     }
 }

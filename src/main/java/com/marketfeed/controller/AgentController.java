@@ -4,6 +4,7 @@ import com.marketfeed.model.AgentRequest;
 import com.marketfeed.model.AgentResponse;
 import com.marketfeed.model.BriefingRequest;
 import com.marketfeed.model.BriefingResponse;
+import com.marketfeed.model.InsightResponse;
 import com.marketfeed.service.AgentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -62,6 +63,18 @@ public class AgentController {
     }
 
     // ── Endpoints ────────────────────────────────────────────────────────────────
+
+    @GetMapping("/insights/{symbol}")
+    @Operation(summary = "Get AI-generated structured insights for a ticker")
+    public ResponseEntity<InsightResponse> insights(
+            @PathVariable String symbol,
+            @RequestParam(defaultValue = "EQUITY") String assetType) {
+        InsightResponse resp = agentService.getInsights(symbol.toUpperCase(), assetType.toUpperCase());
+        if (resp.getError() != null) {
+            return ResponseEntity.status(503).body(resp);
+        }
+        return ResponseEntity.ok(resp);
+    }
 
     @GetMapping("/suggestions")
     @Operation(summary = "Get AI-generated daily question suggestions")
