@@ -24,9 +24,6 @@ market-feed:
   anthropic:
     api-key: ${ANTHROPIC_API_KEY:}
     model: claude-sonnet-4-6
-  reddit:
-    client-id: ${REDDIT_CLIENT_ID:}
-    client-secret: ${REDDIT_CLIENT_SECRET:}
   brave:
     api-key: ${BRAVE_API_KEY:}
   marketdata:
